@@ -84,26 +84,29 @@ def run_backtest():
 
     trades_df = pd.DataFrame(potential_trades).sort_values("Entry_Date")
 
-    # ---------------------------------------------------------
+ # ---------------------------------------------------------
     # STEP 2: Chronological Portfolio & Capital Simulator
     # ---------------------------------------------------------
-    print("Running chronological portfolio simulation with strict capital constraints...")
+    print("Running chronological portfolio simulation with top-tier ranking...")
     
     starting_capital = 1_000_000.0
     cash = starting_capital
-    max_positions = 20
-    allocation_per_trade = 0.05 # 5% per trade
+    max_positions = 10          # Concentrated portfolio
+    allocation_per_trade = 0.10 # 10% per trade to eliminate cash drag
     
     active_positions = []
     executed_trades = []
     equity_history = []
     
+    # Merge the ML probabilities back into the potential trades for ranking
+    trades_df = pd.merge(trades_df, bt_data[['Date', 'Ticker', 'Prob']], 
+                         left_on=['Entry_Date', 'Ticker'], 
+                         right_on=['Date', 'Ticker'], how='left')
+    
     all_dates = sorted(bt_data["Date"].unique())
-    trade_idx = 0
-    num_potential = len(trades_df)
     
     for current_date in all_dates:
-        # 1. Process Exits (Free up capital)
+        # 1. Process Exits (Free up capital first)
         still_open = []
         for pos in active_positions:
             if pos["Exit_Date"] <= current_date:
@@ -113,31 +116,33 @@ def run_backtest():
                 still_open.append(pos)
         active_positions = still_open
         
-        # 2. Process New Entries
-        while trade_idx < num_potential and trades_df.iloc[trade_idx]["Entry_Date"] == current_date:
-            trade = trades_df.iloc[trade_idx]
-            trade_idx += 1
+        # 2. Get today's signals and RANK them by ML Conviction
+        todays_signals = trades_df[trades_df["Entry_Date"] == current_date]
+        if not todays_signals.empty:
+            todays_signals = todays_signals.sort_values(by="Prob", ascending=False)
             
-            holding_tickers = [p["Ticker"] for p in active_positions]
-            if trade["Ticker"] in holding_tickers:
-                continue # Do not buy a stock we already hold
+            for _, trade in todays_signals.iterrows():
+                holding_tickers = [p["Ticker"] for p in active_positions]
+                if trade["Ticker"] in holding_tickers:
+                    continue 
+                    
+                if len(active_positions) < max_positions:
+                    invested_amount = cash * allocation_per_trade
+                    cash -= invested_amount
+                    
+                    active_positions.append({
+                        "Ticker": trade["Ticker"],
+                        "Exit_Date": trade["Exit_Date"],
+                        "Invested": invested_amount,
+                        "Return": trade["Return"]
+                    })
+                    executed_trades.append(trade)
+                else:
+                    break # Out of cash, ignore remaining lower-probability signals
                 
-            if len(active_positions) < max_positions:
-                invested_amount = cash * allocation_per_trade
-                cash -= invested_amount
-                
-                active_positions.append({
-                    "Ticker": trade["Ticker"],
-                    "Exit_Date": trade["Exit_Date"],
-                    "Invested": invested_amount,
-                    "Return": trade["Return"]
-                })
-                executed_trades.append(trade)
-                
-        # Record daily equity (Cash + Initial Capital locked in open trades)
+        # Record daily equity
         current_equity = cash + sum(p["Invested"] for p in active_positions)
         equity_history.append({"Date": current_date, "Equity": current_equity})
-
     # ---------------------------------------------------------
     # STEP 3: Generate Realistic Statistics
     # ---------------------------------------------------------

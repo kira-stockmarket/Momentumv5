@@ -30,17 +30,6 @@ jobs:
       - name: Step 1 - Train LightGBM Model
         run: python train_model.py
 
-      - name: Step 2 - Run Daily Screener
-        run: |
-          # Run the screener and save output to a text file
-          python screen_setups.py > daily_setups.txt
-          
-          # Append the output to the GitHub Actions Step Summary for easy viewing
-          echo "### 🚀 Today's Top 20%+ Breakout Candidates" >> $GITHUB_STEP_SUMMARY
-          echo '```text' >> $GITHUB_STEP_SUMMARY
-          cat daily_setups.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-
       - name: Commit artifacts and data
         run: |
           git config --global user.name "github-actions[bot]"

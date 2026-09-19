@@ -1,18 +1,18 @@
-Loading data and pre-calculating Unbounded Trend-Following exits...
-Running portfolio simulation (Max 25, Vol_Ratio) with Liquid Benchmark Sweep...
+Loading data and configuring Pure Trend-Following Exit Logic (No RL)...
+Running Institutional Engine (Max 25, Vol_Ratio) with Liquid Sweep...
 
 ==================================================
-🚀 INFINITE TREND-FOLLOWING BACKTEST (25 Pos)
+🚀 PURE TREND-FOLLOWING BACKTEST (NO RL)
 ==================================================
-Total Trades Executed: 478
-Win Rate:              41.00%
-Average Winner:        +5.61%
-Average Loser:         -1.87%
-Average Bars Held:     2.3 days
+Total Trades Executed: 102
+Win Rate:              54.90%
+Average Winner:        +17.41%
+Average Loser:         -8.17%
+Average Bars Held:     32.5 days
 --------------------------------------------------
 Starting Capital:      ₹1,000,000.00
-Ending Capital:        ₹1,248,117.84
-CAGR:                  11.73%
-Max Drawdown:          -1.42%
-Sharpe Ratio:          3.10
+Ending Capital:        ₹1,183,173.66
+CAGR:                  8.78%
+Max Drawdown:          -4.18%
+Sharpe Ratio:          2.40
 ==================================================

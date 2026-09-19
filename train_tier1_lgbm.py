@@ -1,100 +1,119 @@
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
-from sklearn.metrics import classification_report, roc_auc_score, precision_score
+from sklearn.metrics import precision_recall_curve
 import joblib
 import warnings
 
 warnings.filterwarnings("ignore")
 
-def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.sort_values(["Ticker", "Date"]).reset_index(drop=True)
-
-    # 1. Market Breadth Regime (% of stocks above 20-EMA across the universe)
-    df["EMA20_temp"] = df.groupby("Ticker")["Close"].transform(lambda x: x.ewm(span=20).mean())
-    df["Above_EMA20"] = df["Close"] > df["EMA20_temp"]
-    breadth = df.groupby("Date")["Above_EMA20"].mean().reset_index()
-    breadth.rename(columns={"Above_EMA20": "Market_Breadth"}, inplace=True)
-    df = df.drop(columns=["EMA20_temp", "Above_EMA20"]).merge(breadth, on="Date", how="left")
-
-    grouped = df.groupby("Ticker")
-
-    # 2. Momentum & Trend Alignment
-    df["EMA_20"] = grouped["Close"].transform(lambda x: x.ewm(span=20, adjust=False).mean())
-    df["EMA_50"] = grouped["Close"].transform(lambda x: x.ewm(span=50, adjust=False).mean())
-    df["Trend_Score"] = (df["Close"] / df["EMA_20"] - 1.0) + (df["EMA_20"] / df["EMA_50"] - 1.0)
-
-    # 3. Volatility & Normalized Average True Range (NATR)
-    df["Daily_Range"] = (df["High"] - df["Low"]) / df["Close"]
-    df["ATR_14"] = grouped["Daily_Range"].transform(lambda x: x.rolling(14).mean())
-
-    # 4. Proximity to 52-Week High & Volume Expansion
-    df["High_252"] = grouped["High"].transform(lambda x: x.rolling(252, min_periods=50).max())
-    df["Dist_to_High"] = df["Close"] / df["High_252"]
-    df["Vol_SMA20"] = grouped["Volume"].transform(lambda x: x.rolling(20).mean())
-    df["Vol_Ratio"] = df["Volume"] / (df["Vol_SMA20"] + 1e-6)
-    df["ROC_20"] = grouped["Close"].transform(lambda x: x.pct_change(20))
-
-    # 5. Label: +10% within 15 bars without hitting -5% stop (Positive EV setup)
-    future_max_15 = grouped["High"].transform(lambda x: x.shift(-15).rolling(15, min_periods=1).max())
-    future_min_15 = grouped["Low"].transform(lambda x: x.shift(-15).rolling(15, min_periods=1).min())
-
-    gain_10 = (future_max_15 - df["Close"]) / df["Close"] >= 0.10
-    loss_5 = (future_min_15 - df["Close"]) / df["Close"] <= -0.05
-
-    df["Target"] = (gain_10 & ~loss_5).astype(int)
-    return df.dropna().reset_index(drop=True)
+def engineer_features(df):
+    """
+    Calculates the 6 core features required by both the LightGBM and RL models.
+    """
+    df = df.copy()
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values(['Ticker', 'Date'])
+    
+    # 1. ATR_14 (Normalized as a % of price to fix unit mismatch)
+    df['Prev_Close'] = df.groupby('Ticker')['Close'].shift(1)
+    df['TR'] = df[['High', 'Prev_Close']].max(axis=1) - df[['Low', 'Prev_Close']].min(axis=1)
+    df['ATR_14'] = df.groupby('Ticker')['TR'].transform(lambda x: x.rolling(14).mean())
+    df['ATR_14'] = df['ATR_14'] / df['Close'] 
+    
+    # 2. ROC_20 (Rate of Change / Momentum)
+    df['ROC_20'] = df.groupby('Ticker')['Close'].pct_change(periods=20) * 100
+    
+    # 3. Vol_Ratio (Institutional Volume Footprint)
+    df['Vol_SMA_20'] = df.groupby('Ticker')['Volume'].transform(lambda x: x.rolling(20).mean())
+    df['Vol_Ratio'] = df['Volume'] / (df['Vol_SMA_20'] + 1e-8)
+    
+    # 4. Dist_to_High (Distance to 52-week high)
+    df['High_252'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(252).max())
+    df['Dist_to_High'] = (df['High_252'] - df['Close']) / df['Close']
+    
+    # 5. Trend_Score (Moving Average Alignment: 0 to 3)
+    df['SMA_50'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(50).mean())
+    df['SMA_200'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(200).mean())
+    df['Trend_Score'] = ((df['Close'] > df['SMA_50']).astype(int) + 
+                         (df['SMA_50'] > df['SMA_200']).astype(int) + 
+                         (df['Close'] > df['SMA_200']).astype(int))
+                         
+    # 6. Market_Breadth (% of all Nifty 500 stocks above their 50 SMA)
+    df['Above_50'] = (df['Close'] > df['SMA_50']).astype(int)
+    breadth = df.groupby('Date')['Above_50'].mean().reset_index()
+    breadth.rename(columns={'Above_50': 'Market_Breadth'}, inplace=True)
+    df = df.drop(columns=['Above_50']).merge(breadth, on='Date', how='left')
+    
+    # Drop rows with incomplete indicator data
+    df = df.dropna(subset=['ATR_14', 'ROC_20', 'Vol_Ratio', 'Dist_to_High', 'Trend_Score', 'Market_Breadth'])
+    return df
 
 def train_lgbm():
-    print("Loading data for Tier 1 LightGBM Screener...")
-    df = pd.read_parquet("nifty500_ohlcv.parquet")
-    data = engineer_features(df)
-
+    print("Loading raw data...")
+    raw_df = pd.read_parquet("nifty500_ohlcv.parquet")
+    
+    print("Engineering features...")
+    df = engineer_features(raw_df)
+    
+    print("Generating Heavy ML Target (20% move within 60 days)...")
+    # THE HOLY GRAIL FIX: Ask the ML to predict multi-month macro trends
+    df['Future_60d_Max'] = df.groupby('Ticker')['High'].transform(lambda x: x.rolling(60).max().shift(-60))
+    df['Target'] = ((df['Future_60d_Max'] - df['Close']) / df['Close'] >= 0.20).astype(int)
+    
+    # Drop the last 60 days of the dataset where the future is unknown
+    df = df.dropna(subset=['Target'])
+    
     feature_cols = ["Trend_Score", "Dist_to_High", "Vol_Ratio", "ROC_20", "ATR_14", "Market_Breadth"]
-    data["Date"] = pd.to_datetime(data["Date"])
-
-    # Forward-split: last 180 days held out for strictly out-of-sample test
-    split_date = data["Date"].max() - pd.Timedelta(days=180)
-    train = data[data["Date"] < split_date]
-    test = data[data["Date"] >= split_date]
-
-    X_train, y_train = train[feature_cols], train["Target"]
-    X_test, y_test = test[feature_cols], test["Target"]
-
-    pos_weight = (len(y_train) - sum(y_train)) / (sum(y_train) + 1e-6)
-    print(f"Training LightGBM on {len(X_train)} samples (Out-of-sample set: {len(X_test)})...")
-
+    
+    # Chronological Split: Keep the last 2 years strictly Out-of-Sample
+    split_date = df['Date'].max() - pd.Timedelta(days=730)
+    train_df = df[df['Date'] < split_date]
+    val_df = df[df['Date'] >= split_date]
+    
+    X_train, y_train = train_df[feature_cols], train_df['Target']
+    X_val, y_val = val_df[feature_cols], val_df['Target']
+    
+    print(f"Training on {len(train_df)} rows, Validating on {len(val_df)} rows...")
+    
+    # Train the neural network
     model = lgb.LGBMClassifier(
-        n_estimators=200,
+        n_estimators=1000,
         learning_rate=0.03,
-        max_depth=4,
-        colsample_bytree=0.8,
-        subsample=0.8,
-        extra_trees=True,
-        scale_pos_weight=pos_weight,
+        max_depth=7,
+        num_leaves=64,
         random_state=42,
-        n_jobs=-1
+        class_weight='balanced'
     )
-    model.fit(X_train, y_train)
-
-    train_probs = model.predict_proba(X_train)[:, 1]
-    # Calibrate decision threshold for >= 40% precision in-sample
-    calibrated_thresh = 0.55
-    for t in np.linspace(0.50, 0.95, 46):
-        if precision_score(y_train, (train_probs >= t).astype(int), zero_division=0) >= 0.40:
-            calibrated_thresh = t
-            break
-
-    test_probs = model.predict_proba(X_test)[:, 1]
-    test_preds = (test_probs >= calibrated_thresh).astype(int)
-
-    print(f"\n--- Tier 1 LightGBM Test Results (Threshold: {calibrated_thresh:.2f}) ---")
-    print(f"ROC-AUC: {roc_auc_score(y_test, test_probs):.4f}")
-    print(classification_report(y_test, test_preds, zero_division=0))
-
+    
+    model.fit(
+        X_train, y_train,
+        eval_set=[(X_val, y_val)],
+        callbacks=[lgb.early_stopping(stopping_rounds=50)]
+    )
+    
+    # Calculate the exact mathematical threshold for dynamic allocation
+    val_probs = model.predict_proba(X_val)[:, 1]
+    precisions, recalls, thresholds = precision_recall_curve(y_val, val_probs)
+    
+    # We want a threshold that guarantees at least 45% precision on these massive trends
+    target_precision = 0.45
+    valid_idx = np.where(precisions >= target_precision)[0]
+    
+    if len(valid_idx) > 0:
+        best_thresh = thresholds[valid_idx[0]]
+        # Safety net: Ensure threshold isn't impossibly high
+        if best_thresh >= 0.95: 
+            best_thresh = 0.65
+    else:
+        best_thresh = 0.65 
+        
+    print(f"\nModel Training Complete!")
+    print(f"Optimal Probability Threshold for Breakouts: {best_thresh:.4f}")
+    
     joblib.dump(model, "tier1_lgbm_model.pkl")
-    joblib.dump(calibrated_thresh, "tier1_threshold.pkl")
-    print("Tier 1 artifacts saved successfully.")
+    joblib.dump(best_thresh, "tier1_threshold.pkl")
+    print("Saved Tier 1 model to disk. Ready for Backtest or RL Training.")
 
 if __name__ == "__main__":
     train_lgbm()

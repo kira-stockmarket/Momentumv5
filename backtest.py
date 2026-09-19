@@ -13,7 +13,7 @@ def calculate_drawdown(equity_curve: pd.Series) -> float:
     return drawdown.min()
 
 def run_backtest():
-    print("Loading data and models for backtest...")
+    print("Loading data and pre-calculating Unbounded Trend-Following exits...")
     raw_df = pd.read_parquet("nifty500_ohlcv.parquet")
     data = engineer_features(raw_df)
     
@@ -23,94 +23,94 @@ def run_backtest():
     
     feature_cols = ["Trend_Score", "Dist_to_High", "Vol_Ratio", "ROC_20", "ATR_14", "Market_Breadth"]
     
-    # Restrict backtest to the last 2 years for Out-of-Sample evaluation
     data["Date"] = pd.to_datetime(data["Date"])
     start_date = data["Date"].max() - pd.Timedelta(days=730)
     bt_data = data[data["Date"] >= start_date].copy()
     
-    print(f"Generating Tier 1 Signals from {start_date.date()} to {bt_data['Date'].max().date()}...")
     bt_data["Prob"] = lgbm.predict_proba(bt_data[feature_cols])[:, 1]
     bt_data["Signal"] = (bt_data["Prob"] >= thresh).astype(int)
     
     signals = bt_data[bt_data["Signal"] == 1].sort_values("Date")
-    
-    # ---------------------------------------------------------
-    # STEP 1: Pre-calculate all potential RL trade outcomes
-    # ---------------------------------------------------------
-    print(f"Pre-calculating RL exit strategies for {len(signals)} raw signals...")
     ticker_groups = dict(tuple(bt_data.groupby("Ticker")))
     potential_trades = []
     
+    # ---------------------------------------------------------
+    # STEP 1: Infinite Momentum Trailing Stop Evaluator
+    # ---------------------------------------------------------
     for _, sig in signals.iterrows():
         ticker = sig["Ticker"]
         entry_date = sig["Date"]
         
         t_data = ticker_groups[ticker]
-        trade_slice = t_data[t_data["Date"] >= entry_date].head(16).reset_index(drop=True)
+        # REMOVED .head(16) -> Trade can run infinitely until trend breaks
+        trade_slice = t_data[t_data["Date"] >= entry_date].reset_index(drop=True)
         
         if len(trade_slice) < 2:
             continue
             
         entry_price = trade_slice.iloc[0]["Close"]
         fee = 0.001 
+        peak_price = entry_price  # Track the highest price during the hold
         
         for step_idx in range(1, len(trade_slice)):
             row = trade_slice.iloc[step_idx]
-            unrealized_pnl = (row["Close"] - entry_price) / entry_price
+            close = row["Close"]
+            peak_price = max(peak_price, close)
+            unrealized_pnl = (close - entry_price) / entry_price
             
-            if unrealized_pnl <= -0.06:  # Hard stop safety guard
+            # Initial Hard Stop Safety Guard
+            if unrealized_pnl <= -0.06:
                 break
                 
-            obs = np.array([
-                unrealized_pnl,
-                min(1.0, step_idx / 15.0),
-                row["ATR_14"],
-                row["ROC_20"],
-                row["Dist_to_High"]
-            ], dtype=np.float32)
-            
-            action, _ = ppo.predict(obs, deterministic=True)
-            if action == 1: 
-                break
+            # Dynamic Volatility Trailing Stop (3x ATR below highest peak)
+            trailing_stop_price = peak_price - (3.0 * row["ATR_14"])
+            if close < trailing_stop_price:
+                break # Momentum Trend Officially Broken
+                
+            # RL Agent oversees the initial breakout phase (first 15 days)
+            if step_idx <= 15:
+                obs = np.array([
+                    unrealized_pnl, min(1.0, step_idx / 15.0),
+                    row["ATR_14"], row["ROC_20"], row["Dist_to_High"]
+                ], dtype=np.float32)
+                
+                action, _ = ppo.predict(obs, deterministic=True)
+                if action == 1: 
+                    break
                 
         realized_return = ((row["Close"] - entry_price) / entry_price) - fee
         potential_trades.append({
-            "Entry_Date": entry_date,
-            "Exit_Date": row["Date"],
-            "Ticker": ticker,
-            "Return": realized_return,
-            "Bars_Held": step_idx
+            "Entry_Date": entry_date, "Exit_Date": row["Date"],
+            "Ticker": ticker, "Return": realized_return, "Bars_Held": step_idx
         })
 
     trades_df = pd.DataFrame(potential_trades).sort_values("Entry_Date")
-
-    if trades_df.empty:
-        print("No trades were generated.")
-        return
-
+    
     # ---------------------------------------------------------
-    # STEP 2: Chronological Portfolio & Capital Simulator
+    # STEP 2: Institutional Portfolio Engine (25 Pos, Vol_Ratio)
     # ---------------------------------------------------------
-    print("Running chronological portfolio simulation with top-tier ranking...")
+    print("Running portfolio simulation (Max 25, Vol_Ratio) with Liquid Benchmark Sweep...")
     
     starting_capital = 1_000_000.0
     cash = starting_capital
-    max_positions = 10          # Concentrated portfolio
-    allocation_per_trade = 0.10 # 10% per trade to eliminate cash drag
+    max_positions = 25
+    allocation = 1.0 / max_positions
+    risk_free_daily_rate = 0.065 / 365.25 # 6.5% Annualized LiquidBeES Yield
     
     active_positions = []
     executed_trades = []
     equity_history = []
     
-    # Merge the ML probabilities back into the potential trades for ranking
-    trades_df = pd.merge(trades_df, bt_data[['Date', 'Ticker', 'Prob']], 
-                         left_on=['Entry_Date', 'Ticker'], 
-                         right_on=['Date', 'Ticker'], how='left')
+    trades_df = pd.merge(trades_df, bt_data[['Date', 'Ticker', 'Vol_Ratio']], 
+                         left_on=['Entry_Date', 'Ticker'], right_on=['Date', 'Ticker'], how='left')
     
     all_dates = sorted(bt_data["Date"].unique())
     
     for current_date in all_dates:
-        # 1. Process Exits (Free up capital first)
+        # Accrue daily risk-free interest on idle cash
+        cash *= (1 + risk_free_daily_rate)
+        
+        # 1. Process Exits
         still_open = []
         for pos in active_positions:
             if pos["Exit_Date"] <= current_date:
@@ -120,45 +120,35 @@ def run_backtest():
                 still_open.append(pos)
         active_positions = still_open
         
-        # 2. Get today's signals and RANK them by ML Conviction
+        # 2. Get today's signals and RANK by Vol_Ratio (Institutional footprint)
         todays_signals = trades_df[trades_df["Entry_Date"] == current_date]
         if not todays_signals.empty:
-            todays_signals = todays_signals.sort_values(by="Prob", ascending=False)
+            todays_signals = todays_signals.sort_values(by="Vol_Ratio", ascending=False)
             
             for _, trade in todays_signals.iterrows():
-                holding_tickers = [p["Ticker"] for p in active_positions]
-                if trade["Ticker"] in holding_tickers:
+                if trade["Ticker"] in [p["Ticker"] for p in active_positions]:
                     continue 
                     
                 if len(active_positions) < max_positions:
-                    invested_amount = cash * allocation_per_trade
+                    invested_amount = cash * allocation
                     cash -= invested_amount
-                    
                     active_positions.append({
-                        "Ticker": trade["Ticker"],
-                        "Exit_Date": trade["Exit_Date"],
-                        "Invested": invested_amount,
-                        "Return": trade["Return"]
+                        "Ticker": trade["Ticker"], "Exit_Date": trade["Exit_Date"],
+                        "Invested": invested_amount, "Return": trade["Return"]
                     })
                     executed_trades.append(trade)
                 else:
-                    break # Out of cash, ignore remaining lower-probability signals
-                
-        # Record daily equity
+                    break 
+                    
+        # Record daily equity (Idle Cash + Capital locked in open trades)
         current_equity = cash + sum(p["Invested"] for p in active_positions)
         equity_history.append({"Date": current_date, "Equity": current_equity})
 
     # ---------------------------------------------------------
-    # STEP 3: Generate Realistic Statistics
+    # STEP 3: Report
     # ---------------------------------------------------------
     exec_df = pd.DataFrame(executed_trades)
-    
-    if exec_df.empty:
-        print("No trades were executed under the capital constraints.")
-        return
-        
     exec_df.to_csv("backtest_trades.csv", index=False)
-    print("All executed trades successfully saved to backtest_trades.csv")
     
     total_trades = len(exec_df)
     winning_trades = exec_df[exec_df["Return"] > 0]
@@ -178,11 +168,10 @@ def run_backtest():
     daily_returns = eq_df["Equity"].pct_change().dropna()
     sharpe = (daily_returns.mean() / (daily_returns.std() + 1e-8)) * np.sqrt(252)
 
-    # Output Report
     print("\n" + "="*50)
-    print("📊 CONCENTRATED OOS BACKTEST (Max 10 Positions, 10% Size)")
+    print("🚀 INFINITE TREND-FOLLOWING BACKTEST (25 Pos)")
     print("="*50)
-    print(f"Total Trades Executed: {total_trades} (Down from {len(trades_df)} signals)")
+    print(f"Total Trades Executed: {total_trades}")
     print(f"Win Rate:              {win_rate:.2%}")
     print(f"Average Winner:        +{avg_win:.2%}")
     print(f"Average Loser:         {avg_loss:.2%}")

@@ -1,0 +1,8 @@
+
+Top 20%+ Momentum Setups:
+     Ticker       Close  Probability
+     HEG.NS  225.800003     0.760897
+    VEDL.NS  267.600006     0.699345
+KPITTECH.NS  532.000000     0.679081
+  KAYNES.NS 3520.000000     0.672455
+ COHANCE.NS  438.000000     0.663634

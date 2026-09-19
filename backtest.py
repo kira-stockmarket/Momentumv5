@@ -84,7 +84,11 @@ def run_backtest():
 
     trades_df = pd.DataFrame(potential_trades).sort_values("Entry_Date")
 
- # ---------------------------------------------------------
+    if trades_df.empty:
+        print("No trades were generated.")
+        return
+
+    # ---------------------------------------------------------
     # STEP 2: Chronological Portfolio & Capital Simulator
     # ---------------------------------------------------------
     print("Running chronological portfolio simulation with top-tier ranking...")
@@ -143,6 +147,7 @@ def run_backtest():
         # Record daily equity
         current_equity = cash + sum(p["Invested"] for p in active_positions)
         equity_history.append({"Date": current_date, "Equity": current_equity})
+
     # ---------------------------------------------------------
     # STEP 3: Generate Realistic Statistics
     # ---------------------------------------------------------
@@ -153,6 +158,7 @@ def run_backtest():
         return
         
     exec_df.to_csv("backtest_trades.csv", index=False)
+    print("All executed trades successfully saved to backtest_trades.csv")
     
     total_trades = len(exec_df)
     winning_trades = exec_df[exec_df["Return"] > 0]
@@ -174,9 +180,9 @@ def run_backtest():
 
     # Output Report
     print("\n" + "="*50)
-    print("📊 REALISTIC OOS BACKTEST (Max 20 Positions, 5% Size)")
+    print("📊 CONCENTRATED OOS BACKTEST (Max 10 Positions, 10% Size)")
     print("="*50)
-    print(f"Total Trades Executed: {total_trades} (Down from {num_potential} signals)")
+    print(f"Total Trades Executed: {total_trades} (Down from {len(trades_df)} signals)")
     print(f"Win Rate:              {win_rate:.2%}")
     print(f"Average Winner:        +{avg_win:.2%}")
     print(f"Average Loser:         {avg_loss:.2%}")

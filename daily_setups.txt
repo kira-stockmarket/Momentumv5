@@ -1,8 +1,17 @@
 
-Top 20%+ Momentum Setups:
-     Ticker       Close  Probability
-     HEG.NS  225.800003     0.760897
-    VEDL.NS  267.600006     0.699345
-KPITTECH.NS  532.000000     0.679081
-  KAYNES.NS 3520.000000     0.672455
- COHANCE.NS  438.000000     0.663634
+=============================================
+🚀 HIGH CONVICTION SETUPS (Threshold: 0.530)
+=============================================
+Current Market Breadth: 24.3% stocks above 20-EMA
+
+       Ticker       Close  Probability   ATR_14
+       HEG.NS  225.800003     0.578892 0.039194
+  FIRSTCRY.NS  172.149994     0.567860 0.039864
+  AEGISLOG.NS 1415.400024     0.555529 0.046747
+    AFCONS.NS  263.399994     0.550795 0.055960
+ FINCABLES.NS 1411.199951     0.544146 0.052198
+CHENNPETRO.NS 1416.599976     0.541773 0.049232
+   WELCORP.NS 2660.100098     0.541496 0.053228
+  GRAPHITE.NS  830.849976     0.540194 0.047659
+   URBANCO.NS  169.110001     0.536297 0.045515
+      TEGA.NS 1943.000000     0.533873 0.047080

@@ -28,7 +28,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Step 1 - Train LightGBM Model
-        run: python train_model.py
+        run: python train_tier1_lgbm.py
 
       - name: Step e - Commit Models & Signal Artifacts
         run: |

@@ -1,21 +1,18 @@
-Loading data and models for backtest...
-Generating Tier 1 Signals from 2024-09-18 to 2026-09-18...
-Pre-calculating RL exit strategies for 1448 raw signals...
-Running chronological portfolio simulation with top-tier ranking...
-All executed trades successfully saved to backtest_trades.csv
+Loading data and pre-calculating Unbounded Trend-Following exits...
+Running portfolio simulation (Max 25, Vol_Ratio) with Liquid Benchmark Sweep...
 
 ==================================================
-📊 CONCENTRATED OOS BACKTEST (Max 10 Positions, 10% Size)
+🚀 INFINITE TREND-FOLLOWING BACKTEST (25 Pos)
 ==================================================
-Total Trades Executed: 94 (Down from 1448 signals)
-Win Rate:              45.74%
-Average Winner:        +12.21%
-Average Loser:         -6.74%
-Average Bars Held:     10.7 days
+Total Trades Executed: 478
+Win Rate:              41.00%
+Average Winner:        +5.61%
+Average Loser:         -1.87%
+Average Bars Held:     2.3 days
 --------------------------------------------------
 Starting Capital:      ₹1,000,000.00
-Ending Capital:        ₹1,120,459.49
-CAGR:                  5.86%
-Max Drawdown:          -6.22%
-Sharpe Ratio:          1.00
+Ending Capital:        ₹1,248,117.84
+CAGR:                  11.73%
+Max Drawdown:          -1.42%
+Sharpe Ratio:          3.10
 ==================================================

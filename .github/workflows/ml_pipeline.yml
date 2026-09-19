@@ -30,13 +30,11 @@ jobs:
       - name: Step 1 - Train LightGBM Model
         run: python train_model.py
 
-      - name: Commit artifacts and data
+      - name: Step e - Commit Models & Signal Artifacts
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # Stage the updated data, the trained model, and the text results
-          git add nifty500_ohlcv.parquet breakout_lgbm_model.pkl daily_setups.txt
+          git add nifty500_ohlcv.parquet tier1_lgbm_model.pkl tier1_threshold.pkl 
           
           # Only commit if there are actual changes
           if git diff --staged --quiet; then

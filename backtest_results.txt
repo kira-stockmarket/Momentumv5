@@ -4,13 +4,13 @@ Running Institutional Portfolio (Max 10, Vol_Ratio) with Liquid Sweep...
 ==================================================
 🚀 AI TREND-FOLLOWING BACKTEST (MAX 10 POSITIONS)
 ==================================================
-Total Trades Executed: 54
-Win Rate:              31.48%
-Average Winner:        +23.70%
-Average Loser:         -7.54%
-Average Bars Held:     37.0 days
+Total Trades Executed: 32
+Win Rate:              28.12%
+Average Winner:        +15.50%
+Average Loser:         -7.79%
+Average Bars Held:     34.9 days
 --------------------------------------------------
-CAGR:                  5.77%
-Max Drawdown:          -6.50%
-Sharpe Ratio:          0.90
+CAGR:                  0.87%
+Max Drawdown:          -10.23%
+Sharpe Ratio:          0.15
 ==================================================

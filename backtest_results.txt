@@ -1,20 +1,8 @@
 Loading data and models for backtest...
 Generating Tier 1 Signals from 2024-09-18 to 2026-09-18...
 Pre-calculating RL exit strategies for 1448 raw signals...
-Running chronological portfolio simulation with strict capital constraints...
+Running chronological portfolio simulation with top-tier ranking...
 
 ==================================================
 📊 REALISTIC OOS BACKTEST (Max 20 Positions, 5% Size)
-==================================================
-Total Trades Executed: 148 (Down from 1448 signals)
-Win Rate:              56.08%
-Average Winner:        +12.08%
-Average Loser:         -6.93%
-Average Bars Held:     11.3 days
---------------------------------------------------
-Starting Capital:      ₹1,000,000.00
-Ending Capital:        ₹1,158,274.73
-CAGR:                  7.63%
-Max Drawdown:          -3.70%
-Sharpe Ratio:          1.63
 ==================================================

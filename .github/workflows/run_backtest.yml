@@ -35,14 +35,17 @@ jobs:
           cat backtest_results.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-      - name: Save Log Artifacts
+      - name: Save Log Artifacts & Trade CSV
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backtest_results.txt || true
+          
+          # Stage the text results and the newly generated CSV file
+          git add backtest_results.txt backtest_trades.csv || true
+          
           if git diff --staged --quiet; then
             echo "No changes to log."
           else
-            git commit -m "Update backtest results [skip ci]"
+            git commit -m "Update backtest results and trade log [skip ci]"
             git push
           fi

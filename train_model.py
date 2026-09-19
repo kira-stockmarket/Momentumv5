@@ -77,7 +77,7 @@ def main():
     # Evaluation
     preds_prob = model.predict_proba(X_test)[:, 1]
     # Filter top decile predictions for high-conviction entries
-    threshold = np.quantile(preds_prob, 0.95)
+    threshold = np.quantile(preds_prob, 0.99)
     preds = (preds_prob >= threshold).astype(int)
 
     print(f"\n--- Out-of-Sample Performance (Threshold: {threshold:.3f}) ---")

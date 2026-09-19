@@ -1,0 +1,61 @@
+name: Nifty 500 ML Breakout Screener
+
+on:
+  schedule:
+    # Runs at 14:30 UTC (20:00 IST) every Monday through Friday
+    - cron: '30 14 * * 1-5'
+  workflow_dispatch: # Allows manual execution from the Actions tab
+
+jobs:
+  run-ml-pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Step 1 - Update Market Data
+        run: python download_data.py
+
+      - name: Step 2 - Train LightGBM Model
+        run: python train_model.py
+
+      - name: Step 3 - Run Daily Screener
+        run: |
+          # Run the screener and save output to a text file
+          python screen_setups.py > daily_setups.txt
+          
+          # Append the output to the GitHub Actions Step Summary for easy viewing
+          echo "### 🚀 Today's Top 20%+ Breakout Candidates" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          cat daily_setups.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Commit artifacts and data
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Stage the updated data, the trained model, and the text results
+          git add nifty500_ohlcv.parquet breakout_lgbm_model.pkl daily_setups.txt
+          
+          # Only commit if there are actual changes
+          if git diff --staged --quiet; then
+            echo "No new changes to commit."
+          else
+            git commit -m "Auto-update data, retrain model, and log daily setups"
+            git push
+          fi

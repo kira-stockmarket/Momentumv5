@@ -5,6 +5,7 @@ from gymnasium import spaces
 from stable_baselines3 import PPO
 import joblib
 import warnings
+from train_tier1_lgbm import engineer_features  # <--- Added missing import
 
 warnings.filterwarnings("ignore")
 
@@ -56,7 +57,7 @@ class TrendFollowingEnv(gym.Env):
             
         elif action == 1: # Agent decides to SELL
             terminated = True
-            # The Probability Paradox fix: Penalize selling if momentum is still surging
+            # Penalize selling if momentum is still surging
             if row["ROC_20"] > 3.0:
                 reward = -10.0 # Severe punishment for cutting a massive winner early
             else:
@@ -84,7 +85,10 @@ class TrendFollowingEnv(gym.Env):
 
 def train_ppo():
     print("Loading Nifty 500 data to generate training environments...")
-    df = pd.read_parquet("nifty500_ohlcv.parquet")
+    raw_df = pd.read_parquet("nifty500_ohlcv.parquet")
+    
+    # <--- FIX: Applied feature engineering before LightGBM prediction
+    df = engineer_features(raw_df)
     
     print("Generating historical breakouts for the RL Agent to practice on...")
     lgbm = joblib.load("tier1_lgbm_model.pkl")
@@ -113,8 +117,8 @@ def train_ppo():
     model = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0005, n_steps=2048)
     model.learn(total_timesteps=150000)
     
-    model.save("tier2_ppo_agent.zip")
-    print("Saved upgraded neural network to tier2_ppo_agent.zip")
+    model.save("tier2_ppo_trend.zip")
+    print("Saved upgraded neural network to tier2_ppo_trend.zip")
 
 if __name__ == "__main__":
     train_ppo()

@@ -27,13 +27,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Step 1 - Update Market Data
-        run: python download_data.py
-
-      - name: Step 2 - Train LightGBM Model
+      - name: Step 1 - Train LightGBM Model
         run: python train_model.py
 
-      - name: Step 3 - Run Daily Screener
+      - name: Step 2 - Run Daily Screener
         run: |
           # Run the screener and save output to a text file
           python screen_setups.py > daily_setups.txt

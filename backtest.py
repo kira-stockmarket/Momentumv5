@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import joblib
+from stable_baselines3 import PPO
 from train_tier1_lgbm import engineer_features
 import warnings
 
@@ -12,12 +13,14 @@ def calculate_drawdown(equity_curve: pd.Series) -> float:
     return drawdown.min()
 
 def run_backtest():
-    print("Loading data and configuring Pure Trend-Following Exit Logic (No RL)...")
+    print("Loading data and configuring the New RL Trend-Follower...")
     raw_df = pd.read_parquet("nifty500_ohlcv.parquet")
     data = engineer_features(raw_df)
     
     lgbm = joblib.load("tier1_lgbm_model.pkl")
     thresh = joblib.load("tier1_threshold.pkl")
+    # LOAD THE NEW TREND MODEL
+    ppo = PPO.load("tier2_ppo_trend.zip") 
     
     feature_cols = ["Trend_Score", "Dist_to_High", "Vol_Ratio", "ROC_20", "ATR_14", "Market_Breadth"]
     
@@ -25,7 +28,6 @@ def run_backtest():
     start_date = data["Date"].max() - pd.Timedelta(days=730)
     bt_data = data[data["Date"] >= start_date].copy()
     
-    # Generate Entry Signals via LightGBM
     bt_data["Prob"] = lgbm.predict_proba(bt_data[feature_cols])[:, 1]
     bt_data["Signal"] = (bt_data["Prob"] >= thresh).astype(int)
     
@@ -33,9 +35,6 @@ def run_backtest():
     ticker_groups = dict(tuple(bt_data.groupby("Ticker")))
     potential_trades = []
     
-    # ---------------------------------------------------------
-    # STEP 1: Pure 3-ATR Trailing Stop Logic (Unbounded)
-    # ---------------------------------------------------------
     for _, sig in signals.iterrows():
         ticker = sig["Ticker"]
         entry_date = sig["Date"]
@@ -54,24 +53,28 @@ def run_backtest():
             row = trade_slice.iloc[step_idx]
             close = row["Close"]
             peak_price = max(peak_price, close)
-            
-            # Smart ATR logic to handle both percentage and raw price formats
-            atr = row["ATR_14"]
-            if atr < 1.0: 
-                # ATR is normalized as a percentage (e.g., 0.03 for 3%)
-                trailing_stop_price = peak_price * (1 - (3.0 * atr))
-            else:
-                # ATR is a raw price value (e.g., ₹15.5)
-                trailing_stop_price = peak_price - (3.0 * atr)
-                
-            # Initial Hard Stop Safety Guard (8% to survive early chop)
             unrealized_pnl = (close - entry_price) / entry_price
+            
+            # Initial Hard Stop Safety Guard
             if unrealized_pnl <= -0.08:
                 break
                 
-            # Execute Trailing Stop
-            if close < trailing_stop_price:
-                break 
+            # Allow the RL agent to manage the trade for up to 120 days
+            if step_idx <= 120:
+                obs = np.array([
+                    unrealized_pnl, min(1.0, step_idx / 120.0),
+                    row["ATR_14"], row["ROC_20"], row["Dist_to_High"]
+                ], dtype=np.float32)
+                
+                action, _ = ppo.predict(obs, deterministic=True)
+                if action == 1: 
+                    break
+            else:
+                # If it survives past 120 days, use a 3-ATR trailing stop to ride it infinitely
+                atr = row["ATR_14"]
+                trailing_stop_price = (peak_price * (1 - (3.0 * atr))) if atr < 1.0 else (peak_price - (3.0 * atr))
+                if close < trailing_stop_price:
+                    break 
                 
         realized_return = ((row["Close"] - entry_price) / entry_price) - fee
         potential_trades.append({
@@ -81,16 +84,13 @@ def run_backtest():
 
     trades_df = pd.DataFrame(potential_trades).sort_values("Entry_Date")
     
-    # ---------------------------------------------------------
-    # STEP 2: Institutional Portfolio Engine (25 Pos, Vol_Ratio)
-    # ---------------------------------------------------------
-    print("Running Institutional Engine (Max 25, Vol_Ratio) with Liquid Sweep...")
+    print("Running Institutional Portfolio (Max 10, Vol_Ratio) with Liquid Sweep...")
     
     starting_capital = 1_000_000.0
     cash = starting_capital
-    max_positions = 25
+    max_positions = 10  # CONCENTRATED PORTFOLIO TO BEAT CASH DRAG
     allocation = 1.0 / max_positions
-    risk_free_daily_rate = 0.065 / 365.25 # 6.5% Annualized LiquidBeES Yield
+    risk_free_daily_rate = 0.065 / 365.25 
     
     active_positions = []
     executed_trades = []
@@ -102,10 +102,8 @@ def run_backtest():
     all_dates = sorted(bt_data["Date"].unique())
     
     for current_date in all_dates:
-        # Accrue overnight risk-free interest
         cash *= (1 + risk_free_daily_rate)
         
-        # 1. Process Exits
         still_open = []
         for pos in active_positions:
             if pos["Exit_Date"] <= current_date:
@@ -115,7 +113,6 @@ def run_backtest():
                 still_open.append(pos)
         active_positions = still_open
         
-        # 2. Process Entries Ranked by Volume 
         todays_signals = trades_df[trades_df["Entry_Date"] == current_date]
         if not todays_signals.empty:
             todays_signals = todays_signals.sort_values(by="Vol_Ratio", ascending=False)
@@ -135,21 +132,15 @@ def run_backtest():
                 else:
                     break 
                     
-        # Record daily equity
         current_equity = cash + sum(p["Invested"] for p in active_positions)
         equity_history.append({"Date": current_date, "Equity": current_equity})
 
-    # ---------------------------------------------------------
-    # STEP 3: Report
-    # ---------------------------------------------------------
     exec_df = pd.DataFrame(executed_trades)
     
     if exec_df.empty:
         print("No trades executed.")
         return
         
-    exec_df.to_csv("backtest_trades.csv", index=False)
-    
     total_trades = len(exec_df)
     winning_trades = exec_df[exec_df["Return"] > 0]
     losing_trades = exec_df[exec_df["Return"] <= 0]
@@ -169,7 +160,7 @@ def run_backtest():
     sharpe = (daily_returns.mean() / (daily_returns.std() + 1e-8)) * np.sqrt(252)
 
     print("\n" + "="*50)
-    print("🚀 PURE TREND-FOLLOWING BACKTEST (NO RL)")
+    print("🚀 AI TREND-FOLLOWING BACKTEST (MAX 10 POSITIONS)")
     print("="*50)
     print(f"Total Trades Executed: {total_trades}")
     print(f"Win Rate:              {win_rate:.2%}")
@@ -177,8 +168,6 @@ def run_backtest():
     print(f"Average Loser:         {avg_loss:.2%}")
     print(f"Average Bars Held:     {exec_df['Bars_Held'].mean():.1f} days")
     print("-" * 50)
-    print(f"Starting Capital:      ₹{starting_capital:,.2f}")
-    print(f"Ending Capital:        ₹{final_equity:,.2f}")
     print(f"CAGR:                  {cagr:.2%}")
     print(f"Max Drawdown:          {max_dd:.2%}")
     print(f"Sharpe Ratio:          {sharpe:.2f}")

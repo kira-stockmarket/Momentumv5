@@ -21,6 +21,7 @@ def run_backtest():
     thresh = joblib.load("tier1_threshold.pkl")
     # LOAD THE NEW TREND MODEL
     ppo = PPO.load("tier2_ppo_trend.zip") 
+    thesh = 0.65
     
     feature_cols = ["Trend_Score", "Dist_to_High", "Vol_Ratio", "ROC_20", "ATR_14", "Market_Breadth"]
     
@@ -88,7 +89,7 @@ def run_backtest():
     
     starting_capital = 1_000_000.0
     cash = starting_capital
-    max_positions = 10  # CONCENTRATED PORTFOLIO TO BEAT CASH DRAG
+    max_positions = 5  # CONCENTRATED PORTFOLIO TO BEAT CASH DRAG
     allocation = 1.0 / max_positions
     risk_free_daily_rate = 0.065 / 365.25 
     

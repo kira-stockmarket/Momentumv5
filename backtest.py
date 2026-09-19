@@ -108,6 +108,10 @@ def run_backtest():
         
     trades_df = trades_df.sort_values("Exit_Date")
     
+    # Save all trades to a CSV file
+    trades_df.to_csv("backtest_trades.csv", index=False)
+    print("All trades successfully saved to backtest_trades.csv")
+    
     # ---- Calculate Statistics ----
     total_trades = len(trades_df)
     winning_trades = trades_df[trades_df["Return"] > 0]

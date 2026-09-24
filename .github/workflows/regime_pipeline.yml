@@ -2,8 +2,8 @@ name: Market Regime Pipeline
 
 on:
   schedule:
-    - cron: '0 12 * * 1-5'  # Runs Monday through Friday after market close (UTC)
-  workflow_dispatch:        # Allows manual triggering from GitHub UI
+    - cron: '0 12 * * 1-5'  
+  workflow_dispatch:        
 
 jobs:
   run-pipeline:
@@ -20,11 +20,13 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
+        # Changed: Removed torch, added hmmlearn
         run: |
           python -m pip install --upgrade pip
-          pip install torch numpy pandas yfinance scikit-learn matplotlib
+          pip install numpy pandas yfinance scikit-learn matplotlib hmmlearn
 
-      - name: Train model and generate CAGR plot
+      - name: Train HMM model and generate CAGR plot
+        # Ensure the filename matches what you committed to GitHub!
         run: |
           python regime_model.py
 
